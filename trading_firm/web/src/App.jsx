@@ -1,244 +1,63 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { MacroStrip } from "./components/MacroStrip";
-import { MarketStrip } from "./components/MarketStrip";
 import { MobileTabBar, SidebarNav } from "./components/NavShell";
 import { PositionsView } from "./components/PositionsView";
 import { ReportsView } from "./components/ReportsView";
 import { TopBar } from "./components/TopBar";
 import { WorkspaceView } from "./components/WorkspaceView";
+import { useAppShellState } from "./hooks/useAppShellState";
+import { useMarketIndicatorsState } from "./hooks/useMarketIndicatorsState";
+import { useMacroStripControls } from "./hooks/useMacroStripControls";
+import { useReportsState } from "./hooks/useReportsState";
+import { connectRealtimeFeed } from "./lib/connectRealtimeFeed";
 import {
-  KR_SYMBOL_NAMES,
-  STORAGE_NAV_ACTIVE,
-  STORAGE_SIDEBAR_COLLAPSED,
-  STORAGE_THEME,
+  DEFAULT_BOOTSTRAP_INDICATOR,
+  LOCAL_CHART_BACKFILL_PAST_BARS_THRESHOLD,
+  LOCAL_CHART_INTERVAL_DEFAULT,
+  LOCAL_CHART_INTERVAL_OPTIONS,
+  LOCAL_CHART_LEFT_BACKFILL_COOLDOWN_MS,
+  LOCAL_CHART_PRICE_SCALE_MIN_WIDTH,
+  LOCAL_CHART_RIGHT_OFFSET,
+  OVERVIEW_PORTFOLIO_POLL_MS,
+  buildTvWidgetUrl,
+  defaultOverview,
+  defaultPortfolio,
+  localChartIntervalLabel,
+  localChartNextRange,
+  localChartPalette,
+  localChartRangeByInterval,
+  localChartRangeLabel,
+  localChartRefreshIntervalMs,
+  localChartTitleFromTvSymbol,
+  macroIndicatorChartQuery,
+  normalizeLocalChartInterval,
+  tvChartUrl,
+} from "./lib/appCoreConfig";
+import {
   api,
-  formatTs,
   isKrTvSymbol,
-  normalizeKrCode,
   normalizeNav,
-  normalizeTheme,
   resolveKrQueryAlias,
-  storageGet,
-  storageSet,
   toTvSymbol,
   withThemeWidgetUrl,
 } from "./lib/dashboardUtils";
 
-function localChartPalette(theme) {
-  const dark = theme === "dark";
-  return {
-    background: dark ? "#141f2b" : "#ffffff",
-    text: dark ? "#9fb0c2" : "#6b7684",
-    grid: dark ? "#243546" : "#eef2f7",
-    up: "#f04452",
-    down: "#3f7cff",
-    volumeUp: dark ? "rgba(240, 68, 82, 0.55)" : "rgba(240, 68, 82, 0.38)",
-    volumeDown: dark ? "rgba(63, 124, 255, 0.55)" : "rgba(63, 124, 255, 0.38)",
-  };
-}
-
-function defaultOverview() {
-  return {
-    paused: false,
-    server_time_kst: null,
-    accounts: [],
-    metrics: { signals_today: 0, fills_today: 0 },
-    latest_report: null,
-  };
-}
-
-function defaultPortfolio() {
-  return {
-    totals: {},
-    positions: [],
-    recent_fills: [],
-    agent_exposure: [],
-    quick_symbols: [],
-  };
-}
-
-const TEMP_MACRO_SKELETON_MS = 4000;
-const OVERVIEW_PORTFOLIO_POLL_MS = 5000;
-const MARKET_INDICATOR_FALLBACK_POLL_MS = 2000;
-const MARKET_INDICATOR_STREAM_STALE_MS = 4500;
-const LOCAL_CHART_RIGHT_OFFSET = 4;
-const LOCAL_CHART_PRICE_SCALE_MIN_WIDTH = 92;
-const LOCAL_CHART_REFRESH_MS = {
-  "1m": 3000,
-  "3m": 4000,
-  "5m": 5000,
-  "15m": 8000,
-  "30m": 12000,
-  "60m": 15000,
-  "4h": 30000,
-  "1d": 60000,
-};
-const LOCAL_CHART_INTERVAL_OPTIONS = [
-  { value: "1m", label: "1분", range: "5d" },
-  { value: "3m", label: "3분", range: "5d" },
-  { value: "5m", label: "5분", range: "5d" },
-  { value: "15m", label: "15분", range: "5d" },
-  { value: "30m", label: "30분", range: "1mo" },
-  { value: "60m", label: "1시간", range: "2mo" },
-  { value: "4h", label: "4시간", range: "6mo" },
-  { value: "1d", label: "1일", range: "1y" },
-];
-const LOCAL_CHART_INTERVAL_VALUES = new Set(LOCAL_CHART_INTERVAL_OPTIONS.map((opt) => opt.value));
-const LOCAL_CHART_INTERVAL_DEFAULT = "30m";
-const LOCAL_CHART_BACKFILL_PAST_BARS_THRESHOLD = 24;
-const LOCAL_CHART_LEFT_BACKFILL_COOLDOWN_MS = 1200;
-const MACRO_INDICATOR_CHART_QUERY = {
-  usdkrw: "FX_IDC:USDKRW",
-  nasdaq: "NASDAQ:IXIC",
-  nasdaq100f: "CME_MINI:NQ1!",
-  sp500: "SP:SPX",
-  dowjones: "DJ:DJI",
-  vix: "TVC:VIX",
-  kospi: "TVC:KOSPI",
-  kosdaq: "TVC:KOSDAQ",
-};
-const DEFAULT_BOOTSTRAP_INDICATOR = {
-  id: "usdkrw",
-  label: "달러 환율",
-  tv_symbol: "FX_IDC:USDKRW",
-};
-
-function macroIndicatorChartQuery(item) {
-  const id = String(item?.id || "").trim().toLowerCase();
-  if (id && MACRO_INDICATOR_CHART_QUERY[id]) {
-    return MACRO_INDICATOR_CHART_QUERY[id];
-  }
-  const fallback = String(item?.tv_symbol || item?.symbol || "").trim();
-  return fallback || "";
-}
-
-function tvChartUrl(tvSymbol) {
-  return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tvSymbol)}`;
-}
-
-function buildTvWidgetUrl(tvSymbol) {
-  const params = new URLSearchParams({
-    symbol: tvSymbol,
-    interval: "30",
-    hidesidetoolbar: "0",
-    symboledit: "1",
-    saveimage: "1",
-    toolbarbg: "#f5f7fa",
-    theme: "light",
-    style: "1",
-    timezone: "Asia/Seoul",
-    withdateranges: "1",
-    hide_top_toolbar: "0",
-    allow_symbol_change: "1",
-    locale: "kr",
-    details: "1",
-    hotlist: "1",
-    calendar: "1",
-  });
-  return `https://s.tradingview.com/widgetembed/?${params.toString()}`;
-}
-
-function normalizeLocalChartInterval(interval) {
-  const normalized = String(interval || "").trim().toLowerCase();
-  return LOCAL_CHART_INTERVAL_VALUES.has(normalized) ? normalized : LOCAL_CHART_INTERVAL_DEFAULT;
-}
-
-function localChartRangeByInterval(interval) {
-  const normalized = normalizeLocalChartInterval(interval);
-  return LOCAL_CHART_INTERVAL_OPTIONS.find((opt) => opt.value === normalized)?.range || "2mo";
-}
-
-function localChartRangeSteps(interval) {
-  const normalized = normalizeLocalChartInterval(interval);
-  if (normalized === "1d") {
-    return ["1y", "2y", "5y"];
-  }
-  if (normalized === "4h") {
-    return ["6mo", "1y", "2y", "5y"];
-  }
-  if (normalized === "60m") {
-    return ["2mo", "3mo", "6mo", "1y", "2y", "5y"];
-  }
-  if (normalized === "30m") {
-    return ["1mo", "2mo", "3mo", "6mo", "1y", "2y", "5y"];
-  }
-  return ["5d", "1mo", "2mo", "3mo", "6mo", "1y", "2y", "5y"];
-}
-
-function localChartNextRange(interval, currentRange) {
-  const steps = localChartRangeSteps(interval);
-  const current = String(currentRange || "").trim().toLowerCase();
-  const idx = steps.indexOf(current);
-  if (idx < 0) {
-    const base = localChartRangeByInterval(interval);
-    const baseIdx = steps.indexOf(base);
-    if (baseIdx >= 0 && baseIdx + 1 < steps.length) return steps[baseIdx + 1];
-    return steps[0] || "";
-  }
-  return steps[idx + 1] || "";
-}
-
-function localChartIntervalLabel(interval) {
-  const normalized = normalizeLocalChartInterval(interval);
-  return LOCAL_CHART_INTERVAL_OPTIONS.find((opt) => opt.value === normalized)?.label || "30분";
-}
-
-function localChartRangeLabel(rangeValue) {
-  const raw = String(rangeValue || "").trim().toLowerCase();
-  const labels = {
-    "1d": "최근 1일",
-    "5d": "최근 5일",
-    "1mo": "최근 1개월",
-    "2mo": "최근 2개월",
-    "3mo": "최근 3개월",
-    "6mo": "최근 6개월",
-    "1y": "최근 1년",
-    "2y": "최근 2년",
-    "5y": "최근 5년",
-  };
-  return labels[raw] || "최근 구간";
-}
-
-function localChartRefreshIntervalMs(interval) {
-  const normalized = normalizeLocalChartInterval(interval);
-  return LOCAL_CHART_REFRESH_MS[normalized] || 10000;
-}
-
-function localChartTitleFromTvSymbol(tvSymbol) {
-  const raw = String(tvSymbol || "").toUpperCase().trim();
-  if (!raw) return "차트";
-  if (raw.startsWith("KRX:") || raw.endsWith(".KS") || raw.endsWith(".KQ")) {
-    const code = normalizeKrCode(raw);
-    const name = KR_SYMBOL_NAMES[code];
-    if (name) return name;
-    return code ? `한국주식 ${code}` : "한국주식";
-  }
-  if (raw.includes(":")) {
-    const [, symbol] = raw.split(":", 2);
-    return symbol || raw;
-  }
-  return raw;
-}
-
 export function App() {
-  const [theme, setTheme] = useState(() => normalizeTheme(storageGet(STORAGE_THEME, "light")));
-  const [activeNav, setActiveNav] = useState(() => {
-    const stored = normalizeNav(storageGet(STORAGE_NAV_ACTIVE, "workspace"));
-    return normalizeNav(window.location.hash || stored);
-  });
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => storageGet(STORAGE_SIDEBAR_COLLAPSED, "0") === "1");
-  const [mobile, setMobile] = useState(false);
+  const {
+    theme,
+    setTheme,
+    activeNav,
+    setActiveNav,
+    sidebarCollapsed,
+    setSidebarCollapsed,
+    mobile,
+  } = useAppShellState();
 
   const [overview, setOverview] = useState(defaultOverview);
   const [portfolio, setPortfolio] = useState(defaultPortfolio);
-  const [marketIndicators, setMarketIndicators] = useState([]);
-  const [marketIndicatorsBooting, setMarketIndicatorsBooting] = useState(true);
-  const [marketIndicatorsSkeletonDemo, setMarketIndicatorsSkeletonDemo] = useState(true);
 
-  const [reports, setReports] = useState([]);
-  const [selectedReport, setSelectedReport] = useState("");
-  const [reportContent, setReportContent] = useState("불러오는 중...");
+  const { reports, selectedReport, reportContent, loadReport, loadReports, changeReport } = useReportsState();
   const [operationLog, setOperationLog] = useState("준비 완료.");
 
   const [symbolInput, setSymbolInput] = useState(DEFAULT_BOOTSTRAP_INDICATOR.tv_symbol);
@@ -251,8 +70,6 @@ export function App() {
   const [localChartMeta, setLocalChartMeta] = useState("데이터 로딩 중...");
   const [localChartInterval, setLocalChartInterval] = useState(LOCAL_CHART_INTERVAL_DEFAULT);
   const [localChartRange, setLocalChartRange] = useState(localChartRangeByInterval(LOCAL_CHART_INTERVAL_DEFAULT));
-  const [canScrollMacroPrev, setCanScrollMacroPrev] = useState(false);
-  const [canScrollMacroNext, setCanScrollMacroNext] = useState(false);
   const sidebarCollapsedEffective = sidebarCollapsed && !mobile;
 
   const macroStripRef = useRef(null);
@@ -275,14 +92,6 @@ export function App() {
   const localChartRefreshBusyRef = useRef(false);
   const chartReadyRef = useRef(false);
 
-  const indicatorStreamRef = useRef(null);
-  const indicatorSocketRef = useRef(null);
-  const indicatorStreamRetryRef = useRef(null);
-  const indicatorStreamActiveRef = useRef(false);
-  const indicatorStreamLastMessageRef = useRef(0);
-  const chartStreamRef = useRef(null);
-  const chartSocketRef = useRef(null);
-  const chartStreamRetryRef = useRef(null);
   const chartStreamActiveRef = useRef(false);
   const localChartPointerRef = useRef({
     downX: null,
@@ -295,47 +104,13 @@ export function App() {
     setOperationLog((prev) => `${line}\n${prev}`.slice(0, 20000));
   }, []);
 
-  useEffect(() => {
-    document.body.classList.toggle("theme-dark", theme === "dark");
-    storageSet(STORAGE_THEME, theme);
-  }, [theme]);
-
-  useEffect(() => {
-    storageSet(STORAGE_NAV_ACTIVE, activeNav);
-    const nextHash = `#${activeNav}`;
-    if (window.location.hash !== nextHash) {
-      window.location.hash = activeNav;
-    }
-  }, [activeNav]);
-
-  useEffect(() => {
-    storageSet(STORAGE_SIDEBAR_COLLAPSED, sidebarCollapsed ? "1" : "0");
-  }, [sidebarCollapsed]);
-
-  useEffect(() => {
-    const onHashChange = () => {
-      setActiveNav((prev) => {
-        const next = normalizeNav(window.location.hash);
-        return prev === next ? prev : next;
-      });
-    };
-    window.addEventListener("hashchange", onHashChange);
-    return () => {
-      window.removeEventListener("hashchange", onHashChange);
-    };
-  }, []);
-
-  useEffect(() => {
-    const media = window.matchMedia("(max-width: 767px)");
-    const sync = () => setMobile(media.matches);
-    sync();
-    if (typeof media.addEventListener === "function") {
-      media.addEventListener("change", sync);
-      return () => media.removeEventListener("change", sync);
-    }
-    media.addListener(sync);
-    return () => media.removeListener(sync);
-  }, []);
+  const {
+    marketIndicators,
+    marketIndicatorsBooting,
+    marketIndicatorsSkeletonDemo,
+    setMarketIndicatorsSkeletonDemo,
+    loadMarketIndicators,
+  } = useMarketIndicatorsState({ log });
 
   const measureLocalChartViewport = useCallback(() => {
     const canvasEl = localChartCanvasRef.current;
@@ -557,95 +332,13 @@ export function App() {
     };
   }, []);
 
-  const updateMacroScrollState = useCallback(() => {
-    const el = macroStripRef.current;
-    if (!el) {
-      setCanScrollMacroPrev(false);
-      setCanScrollMacroNext(false);
-      return;
-    }
-    const maxScrollLeft = Math.max(0, el.scrollWidth - el.clientWidth);
-    const left = el.scrollLeft;
-    setCanScrollMacroPrev(left > 2);
-    setCanScrollMacroNext(left < maxScrollLeft - 2);
-  }, []);
-
-  useEffect(() => {
-    const el = macroStripRef.current;
-    if (!el) return undefined;
-
-    const onDragStart = (ev) => {
-      ev.preventDefault();
-    };
-    updateMacroScrollState();
-    const onScroll = () => updateMacroScrollState();
-    el.addEventListener("scroll", onScroll, { passive: true });
-    el.addEventListener("dragstart", onDragStart);
-
-    let observer = null;
-    if (typeof ResizeObserver !== "undefined") {
-      observer = new ResizeObserver(() => updateMacroScrollState());
-      observer.observe(el);
-    }
-
-    const onResize = () => updateMacroScrollState();
-    window.addEventListener("resize", onResize);
-
-    return () => {
-      el.removeEventListener("scroll", onScroll);
-      el.removeEventListener("dragstart", onDragStart);
-      if (observer) {
-        observer.disconnect();
-      }
-      window.removeEventListener("resize", onResize);
-    };
-  }, [updateMacroScrollState]);
-
-  useEffect(() => {
-    const el = macroStripRef.current;
-    if (!el) return undefined;
-
-    const pinToLeft = () => {
-      el.scrollTo({ left: 0, top: 0, behavior: "auto" });
-      updateMacroScrollState();
-    };
-
-    pinToLeft();
-    const raf1 = window.requestAnimationFrame(pinToLeft);
-    const raf2 = window.requestAnimationFrame(() => {
-      pinToLeft();
-    });
-    return () => {
-      window.cancelAnimationFrame(raf1);
-      window.cancelAnimationFrame(raf2);
-    };
-  }, [marketIndicatorsBooting, marketIndicatorsSkeletonDemo, updateMacroScrollState]);
-
-  useEffect(() => {
-    updateMacroScrollState();
-  }, [marketIndicators, marketIndicatorsBooting, marketIndicatorsSkeletonDemo, updateMacroScrollState]);
-
-  useEffect(() => {
-    const timerId = window.setTimeout(() => {
-      setMarketIndicatorsSkeletonDemo(false);
-    }, TEMP_MACRO_SKELETON_MS);
-    return () => {
-      window.clearTimeout(timerId);
-    };
-  }, []);
-
-  const scrollMacroBy = useCallback((direction) => {
-    const el = macroStripRef.current;
-    if (!el) return;
-    const distance = Math.max(180, Math.round(el.clientWidth * 0.72));
-    el.scrollBy({
-      left: direction * distance,
-      behavior: "smooth",
-    });
-    window.setTimeout(() => {
-      updateMacroScrollState();
-    }, 260);
-  }, [updateMacroScrollState]);
+  const { canScrollMacroPrev, canScrollMacroNext, scrollMacroBy } = useMacroStripControls({
+    macroStripRef,
+    marketIndicators,
+    marketIndicatorsBooting,
+    marketIndicatorsSkeletonDemo,
+    setMarketIndicatorsSkeletonDemo,
+  });
 
   const renderLocalChartFromPayload = useCallback((data, { title = "", fitContent = true } = {}) => {
     const chart = ensureLocalChart();
@@ -1061,43 +754,6 @@ export function App() {
     }
   }, [setChartSymbol, renderIndicatorLocalChart, localChartInterval, log]);
 
-  const loadReport = useCallback(async (date) => {
-    if (!date) {
-      setReportContent("보고서가 아직 없습니다.");
-      return;
-    }
-    const data = await api(`/api/report/${date}`);
-    setReportContent(data.content);
-  }, []);
-
-  const loadReports = useCallback(async () => {
-    const data = await api("/api/reports");
-    const nextReports = Array.isArray(data.reports) ? data.reports : [];
-    setReports(nextReports);
-
-    if (!nextReports.length) {
-      setSelectedReport("");
-      setReportContent("보고서가 아직 없습니다.");
-      return;
-    }
-
-    const selected = selectedReport && nextReports.includes(selectedReport) ? selectedReport : nextReports[0];
-    setSelectedReport(selected);
-    await loadReport(selected);
-  }, [selectedReport, loadReport]);
-
-  const loadMarketIndicators = useCallback(async () => {
-    try {
-      const data = await api("/api/market-indicators");
-      setMarketIndicators(Array.isArray(data.items) ? data.items : []);
-    } catch (err) {
-      setMarketIndicators((prev) => (prev.length ? prev : []));
-      log(`핵심 지표 수신 실패: ${err.message}`);
-    } finally {
-      setMarketIndicatorsBooting(false);
-    }
-  }, [log]);
-
   const refreshAll = useCallback(async () => {
     await loadOverview();
     await loadPortfolio();
@@ -1136,178 +792,16 @@ export function App() {
   }, [loadOverview, loadPortfolio]);
 
   useEffect(() => {
-    const id = window.setInterval(async () => {
-      if (document.visibilityState === "hidden") return;
-      const now = Date.now();
-      const lastMessageAt = Number(indicatorStreamLastMessageRef.current || 0);
-      const streamHealthy =
-        indicatorStreamActiveRef.current
-        && lastMessageAt > 0
-        && now - lastMessageAt < MARKET_INDICATOR_STREAM_STALE_MS;
-      if (streamHealthy) return;
-
-      try {
-        await loadMarketIndicators();
-      } catch (_) {
-        // keep interval silent
-      }
-    }, MARKET_INDICATOR_FALLBACK_POLL_MS);
-    return () => window.clearInterval(id);
-  }, [loadMarketIndicators]);
-
-  useEffect(() => {
-    if (typeof window.WebSocket !== "function" && !window.EventSource) return undefined;
-
-    let stopped = false;
-
-    const stop = () => {
-      if (indicatorSocketRef.current) {
-        indicatorSocketRef.current.close();
-        indicatorSocketRef.current = null;
-      }
-      if (indicatorStreamRef.current) {
-        indicatorStreamRef.current.close();
-        indicatorStreamRef.current = null;
-      }
-      if (indicatorStreamRetryRef.current) {
-        window.clearTimeout(indicatorStreamRetryRef.current);
-        indicatorStreamRetryRef.current = null;
-      }
-      indicatorStreamActiveRef.current = false;
-      indicatorStreamLastMessageRef.current = 0;
-    };
-
-    const scheduleReconnect = (delayMs = 1800) => {
-      if (indicatorStreamRetryRef.current || stopped) return;
-      indicatorStreamRetryRef.current = window.setTimeout(() => {
-        indicatorStreamRetryRef.current = null;
-        if (!stopped) {
-          start();
-        }
-      }, delayMs);
-    };
-
-    const applyPayload = (raw) => {
-      try {
-        const data = JSON.parse(String(raw || "{}"));
-        if (data?.ok === true && Array.isArray(data.items)) {
-          indicatorStreamLastMessageRef.current = Date.now();
-          setMarketIndicators(data.items);
-          setMarketIndicatorsBooting(false);
-        }
-      } catch (_) {
-        // ignore malformed chunks
-      }
-    };
-
-    const startSse = () => {
-      if (!window.EventSource || stopped) return;
-      if (indicatorStreamRef.current) {
-        indicatorStreamRef.current.close();
-        indicatorStreamRef.current = null;
-      }
-      const stream = new EventSource("/api/market-indicators/stream");
-      indicatorStreamRef.current = stream;
-      indicatorStreamActiveRef.current = true;
-
-      stream.onmessage = (ev) => {
-        applyPayload(ev.data);
-      };
-
-      stream.onerror = () => {
-        indicatorStreamActiveRef.current = false;
-        if (stream === indicatorStreamRef.current) {
-          stream.close();
-          indicatorStreamRef.current = null;
-        }
-        scheduleReconnect(2400);
-      };
-    };
-
-    const start = () => {
-      stop();
-      if (stopped) return;
-
-      if (typeof window.WebSocket !== "function") {
-        startSse();
-        return;
-      }
-
-      const wsProtocol = window.location.protocol === "https:" ? "wss" : "ws";
-      const wsUrl = `${wsProtocol}://${window.location.host}/api/market-indicators/ws`;
-      const socket = new window.WebSocket(wsUrl);
-      indicatorSocketRef.current = socket;
-      let opened = false;
-      const openDeadline = window.setTimeout(() => {
-        if (!opened && socket === indicatorSocketRef.current) {
-          socket.close();
-        }
-      }, 2600);
-
-      socket.onopen = () => {
-        opened = true;
-        window.clearTimeout(openDeadline);
-        indicatorStreamActiveRef.current = true;
-        indicatorStreamLastMessageRef.current = Date.now();
-      };
-
-      socket.onmessage = (ev) => {
-        applyPayload(ev.data);
-      };
-
-      socket.onerror = () => {
-        indicatorStreamActiveRef.current = false;
-      };
-
-      socket.onclose = () => {
-        window.clearTimeout(openDeadline);
-        if (socket === indicatorSocketRef.current) {
-          indicatorSocketRef.current = null;
-        }
-        indicatorStreamActiveRef.current = false;
-        if (stopped) return;
-        if (!opened && window.EventSource) {
-          startSse();
-          return;
-        }
-        scheduleReconnect(1800);
-      };
-    };
-
-    start();
-    return () => {
-      stopped = true;
-      stop();
-    };
-  }, []);
-
-  useEffect(() => {
-    const stop = () => {
-      if (chartSocketRef.current) {
-        chartSocketRef.current.close();
-        chartSocketRef.current = null;
-      }
-      if (chartStreamRef.current) {
-        chartStreamRef.current.close();
-        chartStreamRef.current = null;
-      }
-      if (chartStreamRetryRef.current) {
-        window.clearTimeout(chartStreamRetryRef.current);
-        chartStreamRetryRef.current = null;
-      }
-      chartStreamActiveRef.current = false;
-    };
-
     if ((typeof window.WebSocket !== "function" && !window.EventSource)
       || activeNav !== "workspace"
       || chartRenderer !== "local") {
-      stop();
+      chartStreamActiveRef.current = false;
       return undefined;
     }
 
     const context = localChartContextRef.current;
     if (!context) {
-      stop();
+      chartStreamActiveRef.current = false;
       return undefined;
     }
 
@@ -1320,126 +814,37 @@ export function App() {
     } else if (context.kind === "symbol" && context.tvSymbol) {
       params.set("query", String(context.tvSymbol));
     } else {
-      stop();
+      chartStreamActiveRef.current = false;
       return undefined;
     }
 
-    let stopped = false;
     const channelQuery = params.toString();
     const wsProtocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const wsUrl = `${wsProtocol}://${window.location.host}/api/chart/ws?${channelQuery}`;
-    const sseUrl = `/api/chart/stream?${channelQuery}`;
-
-    const handlePayload = (raw) => {
-      try {
-        const data = JSON.parse(String(raw || "{}"));
-        if (data?.ok !== true || !Array.isArray(data?.candles)) return;
-        void renderLocalChartFromPayload(data, {
-          title: context.title || localChartTitle,
-          fitContent: false,
-        });
-      } catch (_) {
-        // ignore malformed event chunks
-      }
-    };
-
-    const scheduleRetry = (delayMs = 1800) => {
-      if (stopped || chartStreamRetryRef.current) return;
-      chartStreamRetryRef.current = window.setTimeout(() => {
-        chartStreamRetryRef.current = null;
-        if (!stopped) {
-          start();
+    const stop = connectRealtimeFeed({
+      wsUrl: `${wsProtocol}://${window.location.host}/api/chart/ws?${channelQuery}`,
+      sseUrl: `/api/chart/stream?${channelQuery}`,
+      wsRetryMs: 1800,
+      sseRetryMs: 2400,
+      openTimeoutMs: 2600,
+      onActiveChange: (active) => {
+        chartStreamActiveRef.current = Boolean(active);
+      },
+      onMessage: (raw) => {
+        try {
+          const data = JSON.parse(String(raw || "{}"));
+          if (data?.ok !== true || !Array.isArray(data?.candles)) return;
+          void renderLocalChartFromPayload(data, {
+            title: context.title || localChartTitle,
+            fitContent: false,
+          });
+        } catch (_) {
+          // ignore malformed event chunks
         }
-      }, delayMs);
-    };
+      },
+    });
 
-    const startSse = () => {
-      if (!window.EventSource || stopped) return;
-      if (chartStreamRef.current) {
-        chartStreamRef.current.close();
-        chartStreamRef.current = null;
-      }
-      const stream = new EventSource(sseUrl);
-      chartStreamRef.current = stream;
-      chartStreamActiveRef.current = true;
-
-      stream.onmessage = (ev) => {
-        handlePayload(ev.data);
-      };
-
-      stream.onerror = () => {
-        if (stream === chartStreamRef.current) {
-          stream.close();
-          chartStreamRef.current = null;
-        }
-        chartStreamActiveRef.current = false;
-        scheduleRetry(2400);
-      };
-    };
-
-    const start = () => {
-      if (stopped) return;
-      if (typeof window.WebSocket !== "function") {
-        startSse();
-        return;
-      }
-      if (chartSocketRef.current) {
-        chartSocketRef.current.close();
-        chartSocketRef.current = null;
-      }
-      const socket = new window.WebSocket(wsUrl);
-      chartSocketRef.current = socket;
-      let opened = false;
-      const openDeadline = window.setTimeout(() => {
-        if (!opened && socket === chartSocketRef.current) {
-          socket.close();
-        }
-      }, 2600);
-
-      socket.onopen = () => {
-        opened = true;
-        window.clearTimeout(openDeadline);
-        chartStreamActiveRef.current = true;
-      };
-
-      socket.onmessage = (ev) => {
-        handlePayload(ev.data);
-      };
-
-      socket.onerror = () => {
-        chartStreamActiveRef.current = false;
-      };
-
-      socket.onclose = () => {
-        window.clearTimeout(openDeadline);
-        if (socket === chartSocketRef.current) {
-          chartSocketRef.current = null;
-        }
-        chartStreamActiveRef.current = false;
-        if (stopped) return;
-        if (!opened && window.EventSource) {
-          startSse();
-          return;
-        }
-        scheduleRetry(1800);
-      };
-    };
-
-    start();
     return () => {
-      stopped = true;
-      if (chartSocketRef.current) {
-        chartSocketRef.current.close();
-        chartSocketRef.current = null;
-      }
-      if (chartStreamRef.current) {
-        chartStreamRef.current.close();
-        chartStreamRef.current = null;
-      }
-      if (chartStreamRetryRef.current) {
-        window.clearTimeout(chartStreamRetryRef.current);
-        chartStreamRetryRef.current = null;
-      }
+      stop();
       chartStreamActiveRef.current = false;
     };
   }, [activeNav, chartRenderer, localChartInterval, localChartRange, currentSymbol, renderLocalChartFromPayload, localChartTitle]);
@@ -1599,11 +1004,6 @@ export function App() {
     log(`보고서 불러옴: ${selectedReport}`);
   }, [selectedReport, loadReport, log]);
 
-  const handleChangeReport = useCallback(async (date) => {
-    setSelectedReport(date);
-    await loadReport(date);
-  }, [loadReport]);
-
   const portfolioTotals = portfolio?.totals || {};
   const positions = portfolio?.positions || [];
   const recentFills = portfolio?.recent_fills || [];
@@ -1650,10 +1050,6 @@ export function App() {
         </button>
       </div>
 
-      <div className="market-strip" id="marketStrip">
-        <MarketStrip overview={overview} totals={portfolioTotals} />
-      </div>
-
       <main className={appShellClassName}>
         <SidebarNav activeNav={activeNav} onChangeNav={handleChangeNav} />
 
@@ -1696,7 +1092,7 @@ export function App() {
             selectedReport={selectedReport}
             reportContent={reportContent}
             operationLog={operationLog}
-            onChangeReport={handleChangeReport}
+            onChangeReport={changeReport}
             onReloadReport={handleReloadReport}
           />
         </section>
