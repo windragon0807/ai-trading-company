@@ -7,6 +7,7 @@
     "frontend:build": "vite build && cp trading_firm/web/dist/app.js trading_firm/web/app.js && rm -rf trading_firm/web/dist"
   },
   "dependencies": {
+    "lucide-react": "^0.576.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

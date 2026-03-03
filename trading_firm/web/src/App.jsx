@@ -59,6 +59,9 @@ function defaultPortfolio() {
 }
 
 const TEMP_MACRO_SKELETON_MS = 4000;
+const OVERVIEW_PORTFOLIO_POLL_MS = 5000;
+const MARKET_INDICATOR_FALLBACK_POLL_MS = 2000;
+const MARKET_INDICATOR_STREAM_STALE_MS = 4500;
 const LOCAL_CHART_RIGHT_OFFSET = 4;
 const LOCAL_CHART_PRICE_SCALE_MIN_WIDTH = 92;
 const LOCAL_CHART_REFRESH_MS = {
@@ -238,7 +241,6 @@ export function App() {
   const [reportContent, setReportContent] = useState("불러오는 중...");
   const [operationLog, setOperationLog] = useState("준비 완료.");
 
-  const [globalSearchInput, setGlobalSearchInput] = useState("");
   const [symbolInput, setSymbolInput] = useState(DEFAULT_BOOTSTRAP_INDICATOR.tv_symbol);
   const [currentSymbol, setCurrentSymbol] = useState(DEFAULT_BOOTSTRAP_INDICATOR.tv_symbol);
   const [openTradingViewUrl, setOpenTradingViewUrl] = useState("#");
@@ -277,6 +279,7 @@ export function App() {
   const indicatorSocketRef = useRef(null);
   const indicatorStreamRetryRef = useRef(null);
   const indicatorStreamActiveRef = useRef(false);
+  const indicatorStreamLastMessageRef = useRef(0);
   const chartStreamRef = useRef(null);
   const chartSocketRef = useRef(null);
   const chartStreamRetryRef = useRef(null);
@@ -1125,15 +1128,32 @@ export function App() {
       try {
         await loadOverview();
         await loadPortfolio();
-        if (!indicatorStreamActiveRef.current) {
-          await loadMarketIndicators();
-        }
       } catch (_) {
         // keep interval silent
       }
-    }, 5000);
+    }, OVERVIEW_PORTFOLIO_POLL_MS);
     return () => window.clearInterval(id);
-  }, [loadOverview, loadPortfolio, loadMarketIndicators]);
+  }, [loadOverview, loadPortfolio]);
+
+  useEffect(() => {
+    const id = window.setInterval(async () => {
+      if (document.visibilityState === "hidden") return;
+      const now = Date.now();
+      const lastMessageAt = Number(indicatorStreamLastMessageRef.current || 0);
+      const streamHealthy =
+        indicatorStreamActiveRef.current
+        && lastMessageAt > 0
+        && now - lastMessageAt < MARKET_INDICATOR_STREAM_STALE_MS;
+      if (streamHealthy) return;
+
+      try {
+        await loadMarketIndicators();
+      } catch (_) {
+        // keep interval silent
+      }
+    }, MARKET_INDICATOR_FALLBACK_POLL_MS);
+    return () => window.clearInterval(id);
+  }, [loadMarketIndicators]);
 
   useEffect(() => {
     if (typeof window.WebSocket !== "function" && !window.EventSource) return undefined;
@@ -1154,6 +1174,7 @@ export function App() {
         indicatorStreamRetryRef.current = null;
       }
       indicatorStreamActiveRef.current = false;
+      indicatorStreamLastMessageRef.current = 0;
     };
 
     const scheduleReconnect = (delayMs = 1800) => {
@@ -1170,6 +1191,7 @@ export function App() {
       try {
         const data = JSON.parse(String(raw || "{}"));
         if (data?.ok === true && Array.isArray(data.items)) {
+          indicatorStreamLastMessageRef.current = Date.now();
           setMarketIndicators(data.items);
           setMarketIndicatorsBooting(false);
         }
@@ -1226,6 +1248,7 @@ export function App() {
         opened = true;
         window.clearTimeout(openDeadline);
         indicatorStreamActiveRef.current = true;
+        indicatorStreamLastMessageRef.current = Date.now();
       };
 
       socket.onmessage = (ev) => {
@@ -1465,8 +1488,6 @@ export function App() {
   }, [activeNav, chartRenderer, localChartInterval, renderIndicatorLocalChart, renderSymbolLocalChart, log]);
 
   const appShellClassName = sidebarCollapsedEffective ? "app-shell sidebar-collapsed" : "app-shell";
-  const serverClockText = overview?.server_time_kst ? `KST ${new Date(overview.server_time_kst).toLocaleString()}` : "--";
-
   const handleChangeNav = useCallback((nav) => {
     setActiveNav(normalizeNav(nav));
   }, []);
@@ -1487,20 +1508,6 @@ export function App() {
       log(`검색 실패: ${err.message}`);
     }
   }, [symbolInput, setChartSymbol, log]);
-
-  const handleGlobalSearchKeyDown = useCallback(async (ev) => {
-    if (ev.key !== "Enter") return;
-    ev.preventDefault();
-    const query = globalSearchInput.trim();
-    if (!query) return;
-    setSymbolInput(query);
-    try {
-      setActiveNav("workspace");
-      await setChartSymbol(query);
-    } catch (err) {
-      log(`검색 실패: ${err.message}`);
-    }
-  }, [globalSearchInput, setChartSymbol, log]);
 
   const handleQuickSymbol = useCallback(async (symbol, row) => {
     const query = row?.tv_symbol || symbol;
@@ -1606,20 +1613,12 @@ export function App() {
   return (
     <>
       <TopBar
-        globalSearchInput={globalSearchInput}
-        onGlobalSearchInputChange={setGlobalSearchInput}
-        onGlobalSearchKeyDown={handleGlobalSearchKeyDown}
         theme={theme}
         onToggleTheme={() => setTheme((prev) => (prev === "dark" ? "light" : "dark"))}
-        paused={Boolean(overview?.paused)}
         onRefreshAll={handleRefreshAll}
         sidebarCollapsed={sidebarCollapsedEffective}
         onToggleSidebar={() => setSidebarCollapsed((prev) => !prev)}
       />
-
-      <div className="status-line">
-        <p id="serverClock">{serverClockText}</p>
-      </div>
 
       <div className="macro-strip-shell">
         <span className={`macro-edge left ${canScrollMacroPrev ? "active" : ""}`} aria-hidden="true" />
