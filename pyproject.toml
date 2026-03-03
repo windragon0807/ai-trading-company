@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trading-firm"
+version = "0.1.0"
+description = "OpenClaw multi-agent paper trading pilot"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "PyYAML>=6.0",
+  "Flask>=3.0",
+  "flask-sock>=0.7.0",
+  "holidays>=0.91",
+]
+
+[project.optional-dependencies]
+data = [
+  "yfinance>=0.2.65",
+  "feedparser>=6.0.11",
+]
+charts = [
+  "playwright>=1.52.0",
+]
+dev = [
+  "pytest>=8.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["trading_firm*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

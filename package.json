@@ -1,0 +1,17 @@
+{
+  "name": "trading-company-frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "frontend:dev": "vite",
+    "frontend:build": "vite build && cp trading_firm/web/dist/app.js trading_firm/web/app.js && rm -rf trading_firm/web/dist"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.0.0",
+    "vite": "^6.0.0"
+  }
+}

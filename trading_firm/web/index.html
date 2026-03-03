@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ryong Investment 마켓 스테이션</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=20260302b" />
+  <link rel="shortcut icon" href="/favicon.ico" />
+  <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" />
+  <link rel="stylesheet" href="/static/styles.css?v=20260303n" />
+</head>
+<body>
+  <div id="appRoot"></div>
+  <noscript>
+    <div id="sidebarNav"></div>
+    <div id="mobileTabBar"></div>
+    <div id="view-workspace"></div>
+    <div id="view-positions"></div>
+    <div id="view-reports"></div>
+  </noscript>
+
+  <script>
+    (function() {
+      var g = typeof globalThis !== "undefined" ? globalThis : window;
+      if (!g.process) g.process = {};
+      if (!g.process.env) g.process.env = {};
+      if (typeof g.process.env.NODE_ENV !== "string") g.process.env.NODE_ENV = "production";
+      if (typeof g.process.emit !== "function") g.process.emit = function() {};
+    })();
+  </script>
+  <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
+  <script type="module" src="/static/app.js?v=20260303n"></script>
+</body>
+</html>

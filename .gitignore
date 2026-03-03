@@ -1,0 +1,29 @@
+# Node / frontend
+node_modules/
+
+# Python / virtualenv
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local tooling caches
+.playwright-cli/
+
+# Runtime/generated artifacts
+output/
+reports/
+state/
+charts/
+
+# Packaging artifacts
+*.egg-info/
+
+# macOS
+.DS_Store
+
+# Nested independent repos
+agents/
+
+# Environment files
+.env

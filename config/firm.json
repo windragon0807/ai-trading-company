@@ -1,0 +1,75 @@
+{
+  "timezone": "Asia/Seoul",
+  "db_path": "state/trading.db",
+  "accounts": {
+    "us": {
+      "account_id": "us-paper",
+      "currency": "USD",
+      "initial_equity": 100000.0
+    },
+    "kr": {
+      "account_id": "kr-paper",
+      "currency": "KRW",
+      "initial_equity": 100000000.0
+    }
+  },
+  "execution": {
+    "fee_bps": 5.0,
+    "slippage_bps": {
+      "us": {"long": 8.0, "short": 12.0},
+      "kr": {"long": 10.0, "short": 20.0}
+    },
+    "borrow_cost_annual": {"us_short": 0.02, "kr_synthetic_short": 0.05},
+    "leverage_cap_gross": 1.2
+  },
+  "risk": {
+    "bucket_weights": {"conservative": 0.40, "balanced": 0.35, "aggressive": 0.25},
+    "bucket_risk_per_trade": {"conservative": 0.0030, "balanced": 0.0035, "aggressive": 0.0040},
+    "bucket_daily_loss_limit": {"conservative": -0.005, "balanced": -0.008, "aggressive": -0.012},
+    "bucket_monthly_loss_limit": {"conservative": -0.025, "balanced": -0.035, "aggressive": -0.050},
+    "portfolio_daily_loss_limit": -0.015,
+    "portfolio_monthly_loss_limit": -0.070,
+    "stop_atr_multiple": 2.0
+  },
+  "strategy": {
+    "bucket_by_strategy": {"trend": "conservative", "meanrev": "balanced", "event": "aggressive"}
+  },
+  "market_data": {
+    "bars_per_symbol": 80,
+    "kr_short_min_volume": 150000
+  },
+  "universe": {
+    "us_candidates": [
+      "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "BRK-B", "JPM", "V",
+      "MA", "UNH", "XOM", "JNJ", "WMT", "PG", "HD", "ABBV", "AVGO", "ORCL",
+      "COST", "AMD", "KO", "MRK", "PEP", "CVX", "BAC", "NFLX", "TMO", "MCD",
+      "CSCO", "ACN", "ADBE", "CRM", "LIN", "QCOM", "TXN", "AMAT", "INTU", "NOW"
+    ],
+    "kr_candidates": [
+      "005930.KS", "000660.KS", "373220.KS", "207940.KS", "005380.KS", "035420.KS", "051910.KS", "068270.KS", "006400.KS", "003670.KS",
+      "105560.KS", "055550.KS", "035720.KS", "028260.KS", "012330.KS", "096770.KS", "066570.KS", "034730.KS", "017670.KS", "000270.KS",
+      "018260.KS", "015760.KS", "251270.KS", "138040.KS", "009150.KS", "011200.KS", "086790.KS", "032830.KS", "010130.KS", "259960.KS",
+      "003550.KS", "047810.KS", "323410.KS", "011170.KS", "024110.KS", "267250.KS", "042700.KS", "336260.KS", "196170.KS", "003490.KS"
+    ]
+  },
+  "reporting": {
+    "language": "ko",
+    "daily_report_dir": "reports/daily",
+    "chart_dir": "charts",
+    "include_chart_count": 10,
+    "include_position_top_n": 6,
+    "include_pnl_top_n": 4,
+    "important_alert_levels": ["critical", "error"]
+  },
+  "control": {
+    "allowed_actors": ["local-cli"]
+  },
+  "news": {
+    "rss_feeds": [
+      "https://feeds.reuters.com/reuters/businessNews",
+      "https://www.marketwatch.com/rss/topstories",
+      "https://www.investing.com/rss/news_25.rss",
+      "https://www.hankyung.com/feed/all-news"
+    ]
+  }
+}
